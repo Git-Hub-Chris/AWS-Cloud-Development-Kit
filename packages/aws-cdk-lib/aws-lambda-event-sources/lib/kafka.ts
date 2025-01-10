@@ -57,11 +57,11 @@ export interface KafkaEventSourceProps extends BaseStreamEventSourceProps {
   readonly onFailure?: lambda.IEventSourceDlq;
 
   /**
-   * The time from which to start reading, in Unix time seconds.
+   * The time from which to start reading. Unix time seconds or `Date`
    *
    * @default - no timestamp
    */
-  readonly startingPositionTimestamp?: number;
+  readonly startingPositionTimestamp?: number | Date;
 }
 
 /**
@@ -175,7 +175,9 @@ export class ManagedKafkaEventSource extends StreamEventSource {
         filters: this.innerProps.filters,
         filterEncryption: this.innerProps.filterEncryption,
         startingPosition: this.innerProps.startingPosition,
-        startingPositionTimestamp: this.innerProps.startingPositionTimestamp,
+        startingPositionTimestamp: this.innerProps.startingPositionTimestamp instanceof Date
+          ? Math.floor(this.innerProps.startingPositionTimestamp.getTime() / 1000)
+          : this.innerProps.startingPositionTimestamp,
         sourceAccessConfigurations: this.sourceAccessConfigurations(),
         kafkaTopic: this.innerProps.topic,
         kafkaConsumerGroupId: this.innerProps.consumerGroupId,
@@ -281,7 +283,9 @@ export class SelfManagedKafkaEventSource extends StreamEventSource {
         kafkaTopic: this.innerProps.topic,
         kafkaConsumerGroupId: this.innerProps.consumerGroupId,
         startingPosition: this.innerProps.startingPosition,
-        startingPositionTimestamp: this.innerProps.startingPositionTimestamp,
+        startingPositionTimestamp: this.innerProps.startingPositionTimestamp instanceof Date
+          ? Math.floor(this.innerProps.startingPositionTimestamp.getTime() / 1000)
+          : this.innerProps.startingPositionTimestamp,
         sourceAccessConfigurations: this.sourceAccessConfigurations(),
         onFailure: this.innerProps.onFailure,
         supportS3OnFailureDestination: true,
