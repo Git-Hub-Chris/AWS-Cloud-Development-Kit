@@ -15,7 +15,7 @@ import {
   loadCurrentTemplateWithNestedStacks,
   type RootTemplateWithNestedStacks,
 } from './nested-stack-helpers';
-import { DEFAULT_TOOLKIT_STACK_NAME } from './toolkit-info';
+import { ToolkitInfo } from './toolkit-info';
 import { determineAllowCrossAccountAssetPublishing } from './util/checks';
 import {
   CloudFormationStack,
@@ -75,13 +75,6 @@ export interface DeployStackOptions {
    * @default false
    */
   readonly quiet?: boolean;
-
-  /**
-   * Name of the toolkit stack, if not the default name
-   *
-   * @default 'CDKToolkit'
-   */
-  readonly toolkitStackName?: string;
 
   /**
    * List of asset IDs which should NOT be built or uploaded
@@ -237,13 +230,6 @@ export interface RollbackStackOptions {
   readonly ci?: boolean;
 
   /**
-   * Name of the toolkit stack, if not the default name
-   *
-   * @default 'CDKToolkit'
-   */
-  readonly toolkitStackName?: string;
-
-  /**
    * Whether to force a rollback or not
    *
    * Forcing a rollback will orphan all undeletable resources.
@@ -334,7 +320,7 @@ export interface StackExistsOptions {
 }
 
 export interface DeploymentsProps {
-  sdkProvider: SdkProvider;
+  readonly sdkProvider: SdkProvider;
   readonly toolkitStackName?: string;
   readonly quiet?: boolean;
 }
@@ -373,7 +359,7 @@ export class Deployments {
   constructor(private readonly props: DeploymentsProps) {
     this.assetSdkProvider = props.sdkProvider;
     this.deployStackSdkProvider = props.sdkProvider;
-    this.envs = new EnvironmentAccess(props.sdkProvider, props.toolkitStackName ?? DEFAULT_TOOLKIT_STACK_NAME);
+    this.envs = new EnvironmentAccess(props.sdkProvider, ToolkitInfo.determineName(props.toolkitStackName));
   }
 
   /**
