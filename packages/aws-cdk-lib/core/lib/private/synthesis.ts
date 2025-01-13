@@ -8,7 +8,7 @@ import { CloudAssembly } from '../../../cx-api';
 import * as cxapi from '../../../cx-api';
 import { Annotations } from '../annotations';
 import { App } from '../app';
-import { AspectApplication, AspectPriority, Aspects } from '../aspect';
+import { AspectApplication, AspectPriority, Aspects, IAspect } from '../aspect';
 import { FileSystem } from '../fs';
 import { Stack } from '../stack';
 import { ISynthesisSession } from '../stack-synthesizers/types';
@@ -219,45 +219,55 @@ function synthNestedAssemblies(root: IConstruct, options: StageSynthesisOptions)
  * twice for the same construct.
  */
 function invokeAspects(root: IConstruct) {
-  const invokedByPath: { [nodePath: string]: AspectApplication[] } = { };
+  const invokedByPath: { [nodePath: string]: Set<AspectApplication> } = { };
 
   let nestedAspectWarning = false;
   recurse(root, []);
 
   function recurse(construct: IConstruct, inheritedAspects: AspectApplication[]) {
-    const node = construct.node;
-    const aspects = Aspects.of(construct);
+    let invoked = invokedByPath[construct.node.path];
+    if (!invoked) {
+      invoked = invokedByPath[construct.node.path] = new Set();
+    }
 
-    let localAspects = getAspectApplications(construct);
-    const allAspectsHere = sortAspectsByPriority(inheritedAspects, localAspects);
+    let lastInvokedAspect: AspectApplication | undefined;
 
-    const nodeAspectsCount = aspects.all.length;
-    for (const aspectApplication of allAspectsHere) {
-      let invoked = invokedByPath[node.path];
-      if (!invoked) {
-        invoked = invokedByPath[node.path] = [];
+    let allAspectsHere = sortAspectsByPriority(inheritedAspects, getAspectApplications(construct));
+
+    // Legacy behavior: only initially applied aspects are inherited. Aspects V2
+    // behavior will inherit these as well.
+    const inheritableAspectApplications = [...allAspectsHere];
+
+    const aspectsInitiallyHere = new Set(allAspectsHere.map(a => a.aspect));
+    while (true) {
+      const next = allAspectsHere.find((a) => !invoked.has(a));
+      if (!next) {
+        break;
+      }
+      // If an aspect was added to the node by another aspect (of lower or equal
+      // priority) it will not be invoked: emit a warning instead. In
+      // `invokeAspectsV2` this will be an arror.
+      if (lastInvokedAspect && lastInvokedAspect.priority >= next.priority && !aspectsInitiallyHere.has(next.aspect)) {
+        if (!nestedAspectWarning) {
+          Annotations.of(construct).addWarningV2('@aws-cdk/core:ignoredAspect', 'We detected an Aspect was added via another Aspect, and will not be applied');
+          nestedAspectWarning = true;
+        }
+        // Treat as invoked, but don't actually invoke (to stick with legacy behavior)
+        invoked.add(next);
+      } else {
+        next.aspect.visit(construct);
+        // mark as invoked for this node
+        invoked.add(next);
+        lastInvokedAspect = next;
       }
 
-      if (invoked.some(invokedApp => invokedApp.aspect === aspectApplication.aspect)) {
-        continue;
-      }
-
-      aspectApplication.aspect.visit(construct);
-
-      // if an aspect was added to the node while invoking another aspect it will not be invoked, emit a warning
-      // the `nestedAspectWarning` flag is used to prevent the warning from being emitted for every child
-      if (!nestedAspectWarning && nodeAspectsCount !== aspects.all.length) {
-        Annotations.of(construct).addWarningV2('@aws-cdk/core:ignoredAspect', 'We detected an Aspect was added via another Aspect, and will not be applied');
-        nestedAspectWarning = true;
-      }
-
-      // mark as invoked for this node
-      invoked.push(aspectApplication);
+      // Refresh allAspectsHere, see above.
+      allAspectsHere = sortAspectsByPriority(inheritedAspects, getAspectApplications(construct));
     }
 
     for (const child of construct.node.children) {
       if (!Stage.isStage(child)) {
-        recurse(child, allAspectsHere);
+        recurse(child, inheritableAspectApplications);
       }
     }
   }
@@ -270,11 +280,12 @@ function invokeAspects(root: IConstruct) {
  * Unlike the original function, this function does not emit a warning for ignored aspects, since this
  * function invokes Aspects that are created by other Aspects.
  *
- * Throws an error if the function attempts to invoke an Aspect on a node that has a lower priority value
- * than the most recently invoked Aspect on that node.
+ * Throws an error if an Aspect adds an aspect with a lower priority than the
+ * one that is currently executing (we detect this come visit time).
  */
 function invokeAspectsV2(root: IConstruct) {
-  const invokedByPath: { [nodePath: string]: AspectApplication[] } = { };
+  const invokedByPath: { [nodePath: string]: Set<IAspect> } = { };
+  const lastInvokedApplicationByPath: { [nodePath: string]: AspectApplication } = { };
 
   recurse(root, []);
 
@@ -289,48 +300,100 @@ function invokeAspectsV2(root: IConstruct) {
   throw new Error('We have detected a possible infinite loop while invoking Aspects. Please check your Aspects and verify there is no configuration that would cause infinite Aspect or Node creation.');
 
   function recurse(construct: IConstruct, inheritedAspects: AspectApplication[]): boolean {
-    const node = construct.node;
-
     let didSomething = false;
 
-    let localAspects = getAspectApplications(construct);
-    const allAspectsHere = sortAspectsByPriority(inheritedAspects, localAspects);
+    let invoked = invokedByPath[construct.node.path];
+    if (!invoked) {
+      invoked = invokedByPath[construct.node.path] = new Set();
+    }
 
-    for (const aspectApplication of allAspectsHere) {
+    const lastInvokedAspect: AspectApplication | undefined = lastInvokedApplicationByPath[construct.node.path];
 
-      let invoked = invokedByPath[node.path];
-      if (!invoked) {
-        invoked = invokedByPath[node.path] = [];
+    // If users are adding aspects with the same priority as the currently executing aspect, execute them anyway.
+    // We do that by re-polling the aspect list after every execution, and skipping the ones that we already did.
+    let allAspectsHere = sortAspectsByPriority(inheritedAspects, getAspectApplications(construct));
+    while (true) {
+      const next = allAspectsHere.find((a) => !invoked.has(a.aspect));
+      if (!next) {
+        break;
       }
 
-      if (invoked.some(invokedApp => invokedApp.aspect === aspectApplication.aspect)) {
-        continue;
-      }
-
-      // If the last invoked Aspect has a higher priority than the current one, throw an error:
-      const lastInvokedAspect = invoked[invoked.length - 1];
-      if (lastInvokedAspect && lastInvokedAspect.priority > aspectApplication.priority) {
+      if (lastInvokedAspect !== undefined && next.priority < lastInvokedAspect.priority /* equal is still okay */) {
         throw new Error(
-          `Cannot invoke Aspect ${aspectApplication.aspect.constructor.name} with priority ${aspectApplication.priority} on node ${node.path}: an Aspect ${lastInvokedAspect.aspect.constructor.name} with a lower priority (${lastInvokedAspect.priority}) was already invoked on this node.`,
+          `Cannot invoke Aspect ${next.aspect.constructor.name} with priority ${next.priority} on node ${construct.node.path}: an Aspect ${lastInvokedAspect.aspect.constructor.name} with a lower priority (${lastInvokedAspect.priority}) was already invoked on this node.`,
         );
-      };
+      }
 
-      aspectApplication.aspect.visit(construct);
+      next.aspect.visit(construct);
 
       didSomething = true;
 
       // mark as invoked for this node
-      invoked.push(aspectApplication);
+      invoked.add(next.aspect);
+      lastInvokedApplicationByPath[construct.node.path] = next;
+
+      // Refresh allAspectsHere, see above.
+      allAspectsHere = sortAspectsByPriority(inheritedAspects, getAspectApplications(construct));
     }
 
-    let childDidSomething = false;
     for (const child of construct.node.children) {
       if (!Stage.isStage(child)) {
-        childDidSomething = recurse(child, allAspectsHere) || childDidSomething;
+        const childDidSmoething = recurse(child, allAspectsHere);
+        didSomething = didSomething || childDidSmoething;
       }
     }
-    return didSomething || childDidSomething;
+    return didSomething;
   }
+}
+
+function invokeAspectsV3(root: IConstruct) {
+  const visitedByApplication = new Map<AspectApplication, Set<IConstruct>>();
+  const visitedByAspect = new Map<IAspect, Set<IConstruct>>();
+
+  while (true) {
+    const queue = orderAspectApplications(allAspectApplicationsInStage(root));
+  }
+
+  function findNextApplication(queue: AspectApplication[]): AspectApplication | undefined {
+    while (queue.length > 0) {
+      const next = queue.shift()!;
+      if (!visitedByApplication.has(next)) {
+        return next;
+      }
+    }
+    return undefined;
+  }
+}
+
+/**
+ * Get all aspect applications in scope in this stage
+ */
+function allAspectApplicationsInStage(root: IConstruct): AspectApplication[] {
+  const ret = new Array<AspectApplication>();
+  recurse(root);
+  return ret;
+
+  function recurse(x: IConstruct) {
+    ret.push(...getAspectApplications(x));
+    for (const child of x.node.children) {
+      if (!Stage.isStage(child)) {
+        recurse(x);
+      }
+    }
+  }
+}
+
+/**
+ * Globally order all aspect applications, first by priority and then by depth.
+ */
+function orderAspectApplications(xs: AspectApplication[]): AspectApplication[] {
+  xs.sort((a, b) => {
+    if (a.priority !== b.priority) {
+      return a.priority - b.priority;
+    }
+    return a.construct.node.path.localeCompare(b.construct.node.path);
+  });
+  return xs;
 }
 
 /**
@@ -353,9 +416,16 @@ function sortAspectsByPriority(inheritedAspects: AspectApplication[], localAspec
   return allAspects;
 }
 
-/**
+/*
  * Helper function to get aspect applications.
- * If `Aspects.applied` is available, it is used; otherwise, create AspectApplications from `Aspects.all`.
+ *
+ * This code exists because for some reason, we are getting reports of people
+ * having a version of the `Aspects` class with no `applied` member -- probably
+ * due to local symlinking or duplicate `aws-cdk-lib` versions, but we haven't
+ * been able to pinpoint it.
+ *
+ * If `Aspects.applied` is available, it is used; otherwise, create
+ * AspectApplications from `Aspects.all`.
  */
 function getAspectApplications(node: IConstruct): AspectApplication[] {
   const aspects = Aspects.of(node);
@@ -364,9 +434,17 @@ function getAspectApplications(node: IConstruct): AspectApplication[] {
   }
 
   // Fallback: Create AspectApplications from `aspects.all`
-  const typedAspects = aspects as Aspects;
-  return typedAspects.all.map(aspect => new AspectApplication(node, aspect, AspectPriority.DEFAULT));
+
+  // We need these aspects to have a stable identity (i.e., every fake AspectApplication
+  // should be the same object every time we call `getAspectApplication`), so we keep them
+  // in a WeakMap.
+  const fakeCache = lazyGet(FAKE_ASPECT_APPLICATION_CACHE, node, () => new WeakMap());
+  return aspects.all.map(aspect => {
+    return lazyGet(fakeCache, aspect, () => new AspectApplication(node, aspect, AspectPriority.DEFAULT));
+  });
 }
+
+const FAKE_ASPECT_APPLICATION_CACHE = new WeakMap<IConstruct, WeakMap<IAspect, AspectApplication>>();
 
 /**
  * Find all stacks and add Metadata Resources to all of them
@@ -495,4 +573,20 @@ function visit(root: IConstruct, order: 'pre' | 'post', cb: (x: IConstruct) => v
   if (order === 'post') {
     cb(root);
   }
+}
+
+interface MapLike<K, V> {
+  get(key: K): V | undefined;
+  set(key: K, value: V): void;
+}
+
+/**
+ * Get a value from a map or put it there using a callback if it doesn't exist yet
+ */
+function lazyGet<K, V>(map: MapLike<K, V>, key: K, defaultValue: () => V): V {
+  let value = map.get(key);
+  if (value === undefined) {
+    map.set(key, value = defaultValue());
+  }
+  return value;
 }
