@@ -354,6 +354,8 @@ export async function exec(args: string[], synthesizer?: Synthesizer): Promise<n
             ? AssetBuildTime.ALL_BEFORE_DEPLOY
             : AssetBuildTime.JUST_IN_TIME,
           ignoreNoStacks: deployOptions.ignoreNoStacks,
+          include: deployOptions.include,
+          exclude: deployOptions.exclude,
         });
 
       case 'rollback':
@@ -390,6 +392,7 @@ export async function exec(args: string[], synthesizer?: Synthesizer): Promise<n
         return cli.watch({
           selector: createSelector(watchOptions.STACKS),
           exclusively: watchOptions.exclusively,
+          output: globalOptions.output,
           toolkitStackName,
           roleArn: globalOptions.roleArn,
           reuseAssets: watchOptions.buildExclude,
@@ -403,6 +406,8 @@ export async function exec(args: string[], synthesizer?: Synthesizer): Promise<n
           hotswap: determineHotswapMode(watchOptions.hotswap, watchOptions.hotswapFallback, true),
           traceLogs: watchOptions.logs,
           concurrency: watchOptions.concurrency,
+          include: watchOptions.include,
+          exclude: watchOptions.exclude,
         });
 
       case 'destroy':

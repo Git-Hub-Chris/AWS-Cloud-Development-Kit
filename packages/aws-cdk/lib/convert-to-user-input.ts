@@ -114,6 +114,8 @@ export function convertYargsToUserInput(args: any): UserInput {
         hotswap: args.hotswap,
         hotswapFallback: args.hotswapFallback,
         watch: args.watch,
+        include: args.include,
+        exclude: args.exclude,
         logs: args.logs,
         concurrency: args.concurrency,
         assetParallelism: args.assetParallelism,
@@ -149,6 +151,8 @@ export function convertYargsToUserInput(args: any): UserInput {
 
     case 'watch':
       commandOptions = {
+        include: args.include,
+        exclude: args.exclude,
         buildExclude: args.buildExclude,
         exclusively: args.exclusively,
         changeSetName: args.changeSetName,
@@ -346,6 +350,8 @@ export function convertConfigToUserInput(config: any): UserInput {
     hotswap: config.deploy?.hotswap,
     hotswapFallback: config.deploy?.hotswapFallback,
     watch: config.deploy?.watch,
+    include: Array.isArray(config.deploy?.include) ? config.deploy?.include : [config.deploy?.include],
+    exclude: Array.isArray(config.deploy?.exclude) ? config.deploy?.exclude : [config.deploy?.exclude],
     logs: config.deploy?.logs,
     concurrency: config.deploy?.concurrency,
     assetParallelism: config.deploy?.assetParallelism,
@@ -369,6 +375,8 @@ export function convertConfigToUserInput(config: any): UserInput {
     resourceMapping: config.import?.resourceMapping,
   };
   const watchOptions = {
+    include: Array.isArray(config.watch?.include) ? config.watch?.include : [config.watch?.include],
+    exclude: Array.isArray(config.watch?.exclude) ? config.watch?.exclude : [config.watch?.exclude],
     buildExclude: config.watch?.buildExclude,
     exclusively: config.watch?.exclusively,
     changeSetName: config.watch?.changeSetName,
