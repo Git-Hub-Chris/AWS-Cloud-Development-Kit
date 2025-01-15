@@ -1,11 +1,11 @@
 import { Construct, IConstruct } from 'constructs';
+import { KubectlV31Layer } from '@aws-cdk/lambda-layer-kubectl-v31';
 import { ICluster, Cluster } from './cluster';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Duration, Stack, Names, CfnCondition, Fn, Aws } from 'aws-cdk-lib/core';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { AwsCliLayer } from 'aws-cdk-lib/lambda-layer-awscli';
-import { KubectlLayer } from 'aws-cdk-lib/lambda-layer-kubectl';
 import * as path from 'path';
 
 /**
@@ -154,7 +154,7 @@ export class KubectlProvider extends Construct implements IKubectlProvider {
 
     // allow user to customize the layers with the tools we need
     handler.addLayers(props.cluster.awscliLayer ?? new AwsCliLayer(this, 'AwsCliLayer'));
-    handler.addLayers(props.cluster.kubectlLayer ?? new KubectlLayer(this, 'KubectlLayer'));
+    handler.addLayers(props.cluster.kubectlLayer ?? new KubectlV31Layer(this, 'KubectlLayer'));
 
     this.handlerRole = handler.role!;
 
