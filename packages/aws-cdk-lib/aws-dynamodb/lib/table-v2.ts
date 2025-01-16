@@ -7,6 +7,7 @@ import {
   Attribute,
   BillingMode,
   LocalSecondaryIndexProps,
+  PointInTimeRecoverySpecification,
   ProjectionType,
   SecondaryIndexProps,
   StreamViewType,
@@ -148,10 +149,18 @@ export interface TableOptionsV2 {
 
   /**
    * Whether point-in-time recovery is enabled.
-   *
-   * @default false
+   * @deprecated `pointInTimeRecoverySpecification` takes precedence over `pointInTimeRecovery`
+   * @default false - point in time recovery is not enabled.
    */
   readonly pointInTimeRecovery?: boolean;
+
+  /**
+   * Whether point-in-time recovery is enabled
+   * and recoveryPeriodInDays is set.
+   *
+   * @default - point in time recovery is not enabled.
+   */
+  readonly pointInTimeRecoverySpecification?: PointInTimeRecoverySpecification | undefined;
 
   /**
    * The table class.
@@ -697,8 +706,16 @@ export class TableV2 extends TableBaseV2 {
   }
 
   private configureReplicaTable(props: ReplicaTableProps): CfnGlobalTable.ReplicaSpecificationProperty {
-    const pointInTimeRecovery = props.pointInTimeRecovery ?? this.tableOptions.pointInTimeRecovery;
     const contributorInsights = props.contributorInsights ?? this.tableOptions.contributorInsights;
+
+    const pointInTimeRecovery = props.pointInTimeRecovery ?? this.tableOptions.pointInTimeRecovery;
+
+    const pointInTimeRecoverySpecification: PointInTimeRecoverySpecification | undefined =
+      props.pointInTimeRecoverySpecification ??
+      this.tableOptions.pointInTimeRecoverySpecification ??
+      (pointInTimeRecovery !== undefined
+        ? { pointInTimeRecoveryEnabled: pointInTimeRecovery }
+        : undefined);
 
     /*
     * Feature flag set as the following may be a breaking change.
@@ -730,9 +747,7 @@ export class TableV2 extends TableBaseV2 {
       contributorInsightsSpecification: contributorInsights !== undefined
         ? { enabled: contributorInsights }
         : undefined,
-      pointInTimeRecoverySpecification: pointInTimeRecovery !== undefined
-        ? { pointInTimeRecoveryEnabled: pointInTimeRecovery }
-        : undefined,
+      pointInTimeRecoverySpecification: pointInTimeRecoverySpecification,
       readProvisionedThroughputSettings: props.readCapacity
         ? props.readCapacity._renderReadCapacity()
         : this.readProvisioning,
