@@ -3,6 +3,7 @@ import * as path from 'path';
 import { Octokit } from '@octokit/rest';
 import { Endpoints } from '@octokit/types';
 import { StatusEvent } from '@octokit/webhooks-definitions/schema';
+import type { components } from '@octokit/openapi-types';
 import { findModulePath, moduleStability } from './module';
 import { breakingModules } from './parser';
 
@@ -10,6 +11,18 @@ export type GitHubPr =
   Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}']['response']['data'];
 
 export const CODE_BUILD_CONTEXT = 'AWS CodeBuild us-east-1 (AutoBuildv2Project1C6BFA3F-wQm2hXv2jqQv)';
+export const CODECOV_PREFIX = 'codecov/';
+
+export const CODECOV_CHECKS = [
+  'patch',
+  'patch/packages/aws-cdk',
+  'patch/packages/aws-cdk-lib/core',
+  'project',
+  'project/packages/aws-cdk',
+  'project/packages/aws-cdk-lib/core'
+];
+
+type CheckRunConclusion = components['schemas']['check-run']['conclusion']
 
 const PR_FROM_MAIN_ERROR = 'Pull requests from `main` branch of a fork cannot be accepted. Please reopen this contribution from another branch on your fork. For more information, see https://github.com/aws/aws-cdk/blob/main/CONTRIBUTING.md#step-4-pull-request.';
 
@@ -24,6 +37,7 @@ enum Exemption {
   CLI_INTEG_TESTED = 'pr-linter/cli-integ-tested',
   REQUEST_CLARIFICATION = 'pr/reviewer-clarification-requested',
   REQUEST_EXEMPTION = 'pr-linter/exemption-requested',
+  CODECOV = "pr-linter/exempt-codecov",
 }
 
 export interface GithubStatusEvent {
@@ -352,6 +366,23 @@ export class PullRequestLinter {
     }
   }
 
+  private async checkRunConclusion(sha: string, checkName: string): Promise<CheckRunConclusion> {    
+    const response = await this.client.paginate(this.client.checks.listForRef, {
+      owner: this.prParams.owner,
+      repo: this.prParams.repo,
+      ref: sha,
+    });
+
+    // grab the last check run that was completed
+    const conclusion = response
+      .filter(c => c.name === checkName && c.completed_at != null)
+      .sort((c1, c2) => c2.completed_at!.localeCompare(c1.completed_at!))
+      .map(s => s.conclusion)[0];
+
+    console.log(`${checkName} conclusion: ${conclusion}`)
+    return conclusion;
+  }
+
   /**
    * Assess whether or not a PR is ready for review.
    * This is needed because some things that we need to evaluate are not filterable on
@@ -523,6 +554,7 @@ export class PullRequestLinter {
 
     console.log(`⌛  Fetching PR number ${number}`);
     const pr = (await this.client.pulls.get(this.prParams)).data as GitHubPr;
+    console.log(`PR base ref is: ${pr.base.ref}`)
 
     console.log(`⌛  Fetching files for PR number ${number}`);
     const files = await this.client.paginate(this.client.pulls.listFiles, this.prParams);
@@ -574,6 +606,28 @@ export class PullRequestLinter {
         { test: validateBranch },
       ],
     });
+
+    if (pr.base.ref === 'main') {
+      // we don't enforce codecov on release branches
+      const codecovTests: Test[] = [];
+      for (const c of CODECOV_CHECKS) {
+        const checkName = `${CODECOV_PREFIX}${c}`;
+        const conclusion = await this.checkRunConclusion(sha, checkName);
+        codecovTests.push({
+          test: () => {
+            const result = new TestResult();
+            const message = conclusion == null ? `${checkName} has not reported a status yet` : `${checkName} job is in status: ${conclusion}`;
+            result.assessFailure(conclusion !== 'success', message);
+            return result;
+          }
+        })
+      }
+  
+      validationCollector.validateRuleSet({
+        exemption: shouldExemptCodecov,
+        testRuleSet: codecovTests,
+      });  
+    }
 
     console.log("Deleting PR Linter Comment now");
     await this.deletePRLinterComment();
@@ -654,6 +708,10 @@ function fixContainsIntegTest(pr: GitHubPr, files: GitHubFile[]): TestResult {
   result.assessFailure(isFix(pr) && (!integTestChanged(files) || !integTestSnapshotChanged(files)),
     'Fixes must contain a change to an integration test file and the resulting snapshot.');
   return result;
+}
+
+function shouldExemptCodecov(pr: GitHubPr): boolean {
+  return hasLabel(pr, Exemption.CODECOV);
 }
 
 function shouldExemptReadme(pr: GitHubPr): boolean {
