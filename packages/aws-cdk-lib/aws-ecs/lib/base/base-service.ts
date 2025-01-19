@@ -1377,7 +1377,7 @@ export abstract class BaseService extends Resource
       awsvpcConfiguration: {
         assignPublicIp: assignPublicIp ? 'ENABLED' : 'DISABLED',
         subnets: vpc.selectSubnets(vpcSubnets).subnetIds,
-        securityGroups: Lazy.list({ produce: () => [securityGroup!.securityGroupId] }),
+        securityGroups: Lazy.list({ produce: () => this.connections.securityGroups.map((sg) => sg.securityGroupId) }),
       },
     };
   }
@@ -1400,7 +1400,7 @@ export abstract class BaseService extends Resource
       awsvpcConfiguration: {
         assignPublicIp: assignPublicIp ? 'ENABLED' : 'DISABLED',
         subnets: vpc.selectSubnets(vpcSubnets).subnetIds,
-        securityGroups: securityGroups.map((sg) => sg.securityGroupId),
+        securityGroups: Lazy.list({ produce: () => this.connections.securityGroups.map((sg) => sg.securityGroupId) }),
       },
     };
   }
