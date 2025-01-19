@@ -55,6 +55,13 @@ export interface KafkaEventSourceProps extends BaseStreamEventSourceProps {
    * @default - discarded records are ignored
    */
   readonly onFailure?: lambda.IEventSourceDlq;
+
+  /**
+   * The time from which to start reading. Unix time seconds or `Date`
+   *
+   * @default - no timestamp
+   */
+  readonly startingPositionTimestamp?: number | Date;
 }
 
 /**
@@ -148,6 +155,15 @@ export class ManagedKafkaEventSource extends StreamEventSource {
 
   constructor(props: ManagedKafkaEventSourceProps) {
     super(props);
+
+    if (props.startingPosition === lambda.StartingPosition.AT_TIMESTAMP && !props.startingPositionTimestamp) {
+      throw new Error('startingPositionTimestamp must be provided when startingPosition is AT_TIMESTAMP');
+    }
+
+    if (props.startingPosition !== lambda.StartingPosition.AT_TIMESTAMP && props.startingPositionTimestamp) {
+      throw new Error('startingPositionTimestamp can only be used when startingPosition is AT_TIMESTAMP');
+    }
+
     this.innerProps = props;
   }
 
@@ -159,6 +175,9 @@ export class ManagedKafkaEventSource extends StreamEventSource {
         filters: this.innerProps.filters,
         filterEncryption: this.innerProps.filterEncryption,
         startingPosition: this.innerProps.startingPosition,
+        startingPositionTimestamp: this.innerProps.startingPositionTimestamp instanceof Date
+          ? Math.floor(this.innerProps.startingPositionTimestamp.getTime() / 1000)
+          : this.innerProps.startingPositionTimestamp,
         sourceAccessConfigurations: this.sourceAccessConfigurations(),
         kafkaTopic: this.innerProps.topic,
         kafkaConsumerGroupId: this.innerProps.consumerGroupId,
@@ -240,6 +259,15 @@ export class SelfManagedKafkaEventSource extends StreamEventSource {
     } else if (!props.secret) {
       throw new Error('secret must be set if Kafka brokers accessed over Internet');
     }
+
+    if (props.startingPosition === lambda.StartingPosition.AT_TIMESTAMP && !props.startingPositionTimestamp) {
+      throw new Error('startingPositionTimestamp must be provided when startingPosition is AT_TIMESTAMP');
+    }
+
+    if (props.startingPosition !== lambda.StartingPosition.AT_TIMESTAMP && props.startingPositionTimestamp) {
+      throw new Error('startingPositionTimestamp can only be used when startingPosition is AT_TIMESTAMP');
+    }
+
     this.innerProps = props;
 
   }
@@ -255,6 +283,9 @@ export class SelfManagedKafkaEventSource extends StreamEventSource {
         kafkaTopic: this.innerProps.topic,
         kafkaConsumerGroupId: this.innerProps.consumerGroupId,
         startingPosition: this.innerProps.startingPosition,
+        startingPositionTimestamp: this.innerProps.startingPositionTimestamp instanceof Date
+          ? Math.floor(this.innerProps.startingPositionTimestamp.getTime() / 1000)
+          : this.innerProps.startingPositionTimestamp,
         sourceAccessConfigurations: this.sourceAccessConfigurations(),
         onFailure: this.innerProps.onFailure,
         supportS3OnFailureDestination: true,
