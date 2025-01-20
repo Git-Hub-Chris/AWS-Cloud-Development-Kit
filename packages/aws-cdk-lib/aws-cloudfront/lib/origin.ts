@@ -3,6 +3,21 @@ import { CfnDistribution } from './cloudfront.generated';
 import { Duration, Token } from '../../core';
 
 /**
+ * The selection criteria for the origin group.
+ */
+export enum OriginSelectionCriteria {
+  /**
+   * Default selection behavior.
+   */
+  DEFAULT='default',
+
+  /**
+   * Selection based on media quality.
+   */
+  MEDIA_QUALITY_BASED='media-quality-based',
+}
+
+/**
  * The failover configuration used for Origin Groups,
  * returned in `OriginBindConfig.failoverConfig`.
  */
@@ -33,6 +48,15 @@ export interface OriginBindConfig {
    * @default - nothing is returned
    */
   readonly failoverConfig?: OriginFailoverConfig;
+
+  /**
+   * The selection criteria for how your origins are selected.
+   *
+   * @see https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/high_availability_origin_failover.html#concept_origin_groups.creating
+   *
+   * @default - OriginSelectionCriteria.DEFAULT
+   */
+  readonly selectionCriteria?: OriginSelectionCriteria;
 }
 
 /**
