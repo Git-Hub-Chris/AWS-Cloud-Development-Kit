@@ -76,3 +76,17 @@ jobs:
           # Github prevents further Github actions to be run if the default Github token is used.
           # Instead use a privileged token here, so further GH actions can be triggered on this PR.
           token: ${{ secrets.PROJEN_GITHUB_TOKEN }}
+- name: Download regions
+  env:
+    URL: https://d3mqmgkwnwa8vm.cloudfront.net/regions.json
+  id: download
+  run: |
+    response=$(curl -s $URL) || { echo "Failed to download regions"; exit 1; }
+    echo "REGIONS=${response}" >> "$GITHUB_OUTPUT"
+    
+    status=$(curl -s -o /dev/null -w "%{http_code}" $URL)
+    echo "STATUS=${status}" >> "$GITHUB_OUTPUT"
+    if [ "$status" -ne 200 ]; then
+      echo "Failed to download regions, status code: $status"
+      exit 1
+    fi
